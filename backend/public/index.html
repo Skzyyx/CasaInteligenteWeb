@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏠 Casa Inteligente</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <!-- Socket.IO se sirve automáticamente desde el servidor -->
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body>
+    <div class="app">
+
+        <!-- ===== HEADER ===== -->
+        <header class="header">
+            <div class="header-title">
+                <span class="logo">🏠</span>
+                <h1>Casa Inteligente</h1>
+            </div>
+            <div class="header-status">
+                <span id="indicador-conexion" class="indicador desconectado"></span>
+                <span id="texto-conexion">Conectando...</span>
+            </div>
+        </header>
+
+        <!-- ===== PANEL DE ALARMA ===== -->
+        <section id="panel-alarma" class="panel-alarma inactiva">
+            <div class="alarma-icono">
+                <span id="alarma-emoji">✅</span>
+            </div>
+            <div class="alarma-texto">
+                <h2 id="alarma-estado">SISTEMA NORMAL</h2>
+                <p id="alarma-subtexto">Todos los sensores operan correctamente</p>
+            </div>
+            <button id="btn-apagar" class="btn-apagar oculto">
+                🔕 Apagar Alarma
+            </button>
+        </section>
+
+        <!-- ===== SENSORES ===== -->
+        <section class="seccion">
+            <h3 class="seccion-titulo">Sensores</h3>
+            <div class="grid-sensores">
+                <div class="sensor-card" data-sensor="DHT22">
+                    <div class="sensor-icono">🌡️</div>
+                    <div class="sensor-nombre">Temperatura / Humedad</div>
+                    <div class="sensor-estado">Normal</div>
+                </div>
+                <div class="sensor-card" data-sensor="MQ2">
+                    <div class="sensor-icono">💨</div>
+                    <div class="sensor-nombre">Gas / Humo</div>
+                    <div class="sensor-estado">Normal</div>
+                </div>
+                <div class="sensor-card" data-sensor="REED">
+                    <div class="sensor-icono">🚪</div>
+                    <div class="sensor-nombre">Puerta</div>
+                    <div class="sensor-estado">Cerrada</div>
+                </div>
+                <div class="sensor-card" data-sensor="PIR">
+                    <div class="sensor-icono">👁️</div>
+                    <div class="sensor-nombre">Movimiento</div>
+                    <div class="sensor-estado">Sin actividad</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== HISTORIAL ===== -->
+        <section class="seccion">
+            <div class="seccion-header">
+                <h3 class="seccion-titulo">Historial de Alertas</h3>
+                <span id="contador-alertas" class="badge">0</span>
+            </div>
+            <div id="lista-alertas" class="lista-alertas">
+                <div class="lista-vacia">
+                    <span>📭</span>
+                    <p>No hay alertas registradas</p>
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+
+</html>
