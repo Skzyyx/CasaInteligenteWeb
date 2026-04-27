@@ -21,4 +21,12 @@
 #define MYSQL_PASS    "esp32pass"
 #define MYSQL_DB      "casa_inteligente"
 
+// ----- MODO SIMULADOR -----
+// Permite probar el sistema completo SIN tener los sensores conectados.
+// Cuando esta en 1, el ESP32 ignora los pines de sensores y genera
+// alertas aleatorias por si mismo (igual que hacia el simulador en Node).
+// Cambia a 0 cuando ya tengas el circuito armado.
+#define MODO_SIMULADOR          1
+#define INTERVALO_SIMULADOR_MS  8000   // milisegundos entre alertas simuladas
+
 #endif

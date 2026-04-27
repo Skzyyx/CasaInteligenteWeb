@@ -18,6 +18,14 @@
 #include <MySQL_Generic.h>
 #include "config.h"
 
+// Defaults por si config.h no los define
+#ifndef MODO_SIMULADOR
+#define MODO_SIMULADOR 0
+#endif
+#ifndef INTERVALO_SIMULADOR_MS
+#define INTERVALO_SIMULADOR_MS 8000
+#endif
+
 // ===== PINES =====
 #define PIN_DHT       4
 #define PIN_MQ2      34
@@ -202,7 +210,9 @@ void apagarAlarmaPersistente() {
 void disparar(const String &sensor, const String &tipo, const String &mensaje,
               const String &valor, const String &severidad, int idxCooldown) {
     unsigned long ahora = millis();
+#if !MODO_SIMULADOR
     if (ahora - ultimaAlerta[idxCooldown] < COOLDOWN_ALERTA) return;
+#endif
     ultimaAlerta[idxCooldown] = ahora;
 
     long id = 0;
@@ -231,6 +241,71 @@ void disparar(const String &sensor, const String &tipo, const String &mensaje,
     emitirEstadoAlarma();
     (void)ok;
 }
+
+// =============================================================
+//  SIMULADOR EMBEBIDO (MODO_SIMULADOR == 1)
+//  Genera alertas aleatorias para probar el sistema completo
+//  sin tener sensores fisicos conectados.
+// =============================================================
+#if MODO_SIMULADOR
+void simularLectura() {
+    char valor[32];
+    long n = random(11);
+    switch (n) {
+        case 0: {
+            float t = 35.0f + random(0, 100) / 10.0f;
+            snprintf(valor, sizeof(valor), "%.1f°C", t);
+            disparar("DHT22", "temperatura_alta", "Temperatura elevada detectada", valor, "alta", 0);
+            break;
+        }
+        case 1: {
+            float h = 75.0f + random(0, 200) / 10.0f;
+            snprintf(valor, sizeof(valor), "%.1f%%", h);
+            disparar("DHT22", "humedad_alta", "Humedad muy elevada", valor, "media", 0);
+            break;
+        }
+        case 2: {
+            float t = 50.0f + random(0, 150) / 10.0f;
+            snprintf(valor, sizeof(valor), "%.1f°C", t);
+            disparar("DHT22", "temperatura_critica", "¡Temperatura critica! Posible incendio", valor, "critica", 0);
+            break;
+        }
+        case 3: {
+            int ppm = 400 + random(0, 400);
+            snprintf(valor, sizeof(valor), "%d ppm", ppm);
+            disparar("MQ2", "gas_detectado", "Concentracion de gas detectada", valor, "alta", 1);
+            break;
+        }
+        case 4: {
+            int ppm = 800 + random(0, 500);
+            snprintf(valor, sizeof(valor), "%d ppm", ppm);
+            disparar("MQ2", "gas_critico", "¡Fuga de gas peligrosa!", valor, "critica", 1);
+            break;
+        }
+        case 5: {
+            int ppm = 300 + random(0, 200);
+            snprintf(valor, sizeof(valor), "%d ppm", ppm);
+            disparar("MQ2", "humo_detectado", "Humo detectado en el ambiente", valor, "alta", 1);
+            break;
+        }
+        case 6:
+            disparar("REED", "puerta_abierta", "Puerta principal abierta", "abierta", "media", 2);
+            break;
+        case 7:
+            disparar("REED", "puerta_forzada", "¡Posible intrusion detectada!", "forzada", "critica", 2);
+            break;
+        case 8:
+            disparar("REED", "ventana_abierta", "Ventana de cocina abierta", "abierta", "baja", 2);
+            break;
+        case 9:
+            disparar("PIR", "movimiento_detectado", "Movimiento detectado en sala", "detectado", "media", 3);
+            break;
+        case 10:
+            disparar("PIR", "movimiento_nocturno", "¡Movimiento detectado durante ausencia!", "detectado", "alta", 3);
+            break;
+    }
+}
+#endif
 
 // =============================================================
 //  LECTURA DE SENSORES
@@ -379,6 +454,11 @@ void setup() {
     Serial.begin(115200);
     delay(200);
 
+#if MODO_SIMULADOR
+    Serial.printf("🤖 MODO SIMULADOR activo — alerta cada %d s\n", INTERVALO_SIMULADOR_MS / 1000);
+#endif
+    randomSeed(micros());
+
     pinMode(PIN_MQ2, INPUT);
     pinMode(PIN_REED, INPUT_PULLUP);
     pinMode(PIN_PIR, INPUT);
@@ -418,8 +498,15 @@ void loop() {
     ws.cleanupClients();
     revisarBoton();
 
+#if MODO_SIMULADOR
+    if (millis() - ultimaLectura >= INTERVALO_SIMULADOR_MS) {
+        ultimaLectura = millis();
+        simularLectura();
+    }
+#else
     if (millis() - ultimaLectura >= INTERVALO_LECTURA) {
         ultimaLectura = millis();
         leerSensores();
     }
+#endif
 }

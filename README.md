@@ -12,6 +12,7 @@ Sistema de monitoreo y alertas en tiempo real para una casa inteligente, desarro
 - [Stack tecnológico](#-stack-tecnológico)
 - [Requisitos previos](#-requisitos-previos)
 - [Instalación](#-instalación)
+- [Probar sin hardware](#-probar-sin-hardware)
 - [Protocolo WebSocket](#-protocolo-websocket)
 - [Estructura del proyecto](#-estructura-del-proyecto)
 - [Hardware](#-hardware)
@@ -235,6 +236,37 @@ Dashboard: http://192.168.1.55/
 ```
 
 Abre esa URL en cualquier navegador conectado a la misma red.
+
+---
+
+## 🧪 Probar sin hardware
+
+Mientras no tengas armado el circuito, el firmware incluye un **modo simulador embebido** que genera alertas aleatorias dentro del propio ESP32. Pasas exactamente por el mismo flujo (alerta → INSERT en MySQL → broadcast por WebSocket → render en el dashboard) pero sin sensores conectados.
+
+### Activarlo
+
+En `firmware/config.h` (que copiaste de la plantilla):
+
+```c
+#define MODO_SIMULADOR          1     // 1 = simulador, 0 = sensores reales
+#define INTERVALO_SIMULADOR_MS  8000  // milisegundos entre alertas
+```
+
+### Lo que necesitas
+
+- ESP32 conectado por USB (es lo unico fisico).
+- WiFi configurado en `config.h`.
+- MySQL accesible desde la red del ESP32 (ya configurado en los pasos anteriores).
+
+### Que hace
+
+- Cada `INTERVALO_SIMULADOR_MS` el ESP32 escoge aleatoriamente uno de los 11 escenarios de alerta (DHT22, MQ2, REED, PIR con sus variantes y severidades) y dispara la alerta como si viniera de un sensor real.
+- Salta el cooldown por sensor para que las demos fluyan sin huecos.
+- El boton fisico sigue funcionando (apagar alarma) pero ya no es necesario; tambien lo apagas desde la UI.
+
+### Cuando llegue el hardware
+
+Cambia `MODO_SIMULADOR` a `0`, recompila y vuelve a subir el sketch. Sin tocar nada mas.
 
 ---
 
