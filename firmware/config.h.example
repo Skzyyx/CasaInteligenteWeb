@@ -1,0 +1,24 @@
+// =============================================================
+//  config.h - Credenciales del firmware
+// =============================================================
+//  Copiar este archivo a "config.h" y rellenar con los valores
+//  reales. config.h NO debe subirse al repositorio.
+// =============================================================
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ----- WiFi -----
+#define WIFI_SSID     "TU_RED_WIFI"
+#define WIFI_PASS     "TU_PASSWORD_WIFI"
+
+// ----- MySQL -----
+// IP de la maquina donde corre MySQL en la LAN.
+// El usuario debe estar creado con mysql_native_password.
+#define MYSQL_HOST    "192.168.1.100"
+#define MYSQL_PORT    3306
+#define MYSQL_USER    "esp32"
+#define MYSQL_PASS    "esp32pass"
+#define MYSQL_DB      "casa_inteligente"
+
+#endif

@@ -1,12 +1,20 @@
-# Dependencias
-node_modules/
+# Credenciales del firmware (WiFi + MySQL)
+firmware/config.h
 
-# Variables de entorno (contiene passwords)
-.env
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.vscode/
+
+# Arduino IDE
+*.bin
+*.elf
+*.hex
+*.map
 
 # Logs
 *.log
-npm-debug.log*
 
 # Sistema
 .DS_Store

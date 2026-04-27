@@ -1,6 +1,6 @@
 # 🏠 Casa Inteligente — Sistema de Monitoreo IoT
 
-Sistema de monitoreo y alertas en tiempo real para una casa inteligente, desarrollado como proyecto final de la materia **Sistemas Empotrados**. Utiliza un microcontrolador **ESP32 DOIT DEV KIT V1** para recolectar datos de múltiples sensores y reportar eventos críticos a un panel de control web.
+Sistema de monitoreo y alertas en tiempo real para una casa inteligente, desarrollado como proyecto final de la materia **Sistemas Empotrados**. Todo el sistema corre dentro de un **ESP32 DOIT DEV KIT V1**: lectura de sensores, control de actuadores, servidor web con la UI servida desde **LittleFS** y comunicacion en tiempo real por WebSocket. La unica pieza externa es la base de datos **MySQL**.
 
 ---
 
@@ -12,131 +12,112 @@ Sistema de monitoreo y alertas en tiempo real para una casa inteligente, desarro
 - [Stack tecnológico](#-stack-tecnológico)
 - [Requisitos previos](#-requisitos-previos)
 - [Instalación](#-instalación)
-- [Uso](#-uso)
-- [Endpoints de la API](#-endpoints-de-la-api)
+- [Protocolo WebSocket](#-protocolo-websocket)
 - [Estructura del proyecto](#-estructura-del-proyecto)
 - [Hardware](#-hardware)
-- [Simulador del ESP32](#-simulador-del-esp32)
-- [Capturas](#-capturas)
-- [Roadmap](#-roadmap)
 
 ---
 
 ## 📖 Descripción
 
-El sistema monitorea cuatro tipos de sensores ambientales y de seguridad en un entorno doméstico. Cuando alguno de los sensores detecta una condición anormal (temperatura excesiva, gas, apertura de puerta, movimiento), el ESP32 envía una alerta al backend, que la persiste en una base de datos y la transmite instantáneamente al dashboard web mediante WebSockets. Desde la página web es posible visualizar el historial, consultar el estado en tiempo real y apagar la alarma física de forma remota.
+El sistema monitorea cuatro tipos de sensores ambientales y de seguridad. Cuando alguno detecta una condicion anormal (temperatura excesiva, gas, apertura de puerta, movimiento), el ESP32:
+
+1. Persiste la alerta en MySQL.
+2. La transmite instantaneamente a todos los dashboards conectados via WebSocket.
+3. Activa la alarma fisica (LED + buzzer).
+
+Desde la pagina web —servida por el propio ESP32— se ve el historial, el estado en tiempo real y se puede apagar la alarma. Tambien existe un boton fisico en la protoboard para apagarla localmente.
 
 ---
 
 ## 🏗️ Arquitectura
 
 ```
-┌─────────────────────┐         WiFi          ┌──────────────────────┐
-│   ESP32 DOIT V1     │◄──────HTTP POST──────►│   Backend Node.js    │
-│                     │                        │   (PC local)         │
-│  ┌──────────────┐   │                        │                      │
-│  │ 4 Sensores   │   │                        │  ┌────────────────┐  │
-│  │ - DHT22      │   │                        │  │ Express + REST │  │
-│  │ - MQ-2       │   │                        │  │ Socket.IO      │  │
-│  │ - Reed       │   │                        │  │ MySQL          │  │
-│  │ - PIR        │   │                        │  └───────┬────────┘  │
-│  └──────────────┘   │                        │          │           │
-│                     │                        └──────────┼───────────┘
-│  ┌──────────────┐   │                                   │ WebSocket
-│  │ Actuadores   │   │◄──────HTTP GET────────────────────┤
-│  │ - LED rojo   │   │    (polling estado)               │
-│  │ - Buzzer     │   │                                   ▼
-│  │ - Botón reset│   │                         ┌─────────────────┐
-│  └──────────────┘   │                         │  Dashboard web  │
-└─────────────────────┘                         │   (navegador)   │
-                                                └─────────────────┘
+┌──────────────────────────────────────────┐
+│              ESP32 DOIT V1               │
+│                                          │
+│  ┌────────────┐    ┌──────────────────┐  │
+│  │ 4 Sensores │    │ Servidor HTTP+WS │  │
+│  │ DHT22, MQ2 │    │ (AsyncWebServer) │  │
+│  │ REED, PIR  │    │                  │  │
+│  └─────┬──────┘    │ UI desde         │  │
+│        │           │ LittleFS         │  │
+│  ┌─────▼──────┐    └─────────┬────────┘  │
+│  │ Logica C++ │              │           │
+│  │ (alertas)  │◄─────WS──────┤           │
+│  └─────┬──────┘              │           │
+│        │                     │           │
+│  ┌─────▼──────┐              │           │
+│  │ Actuadores │              │           │
+│  │ LED+Buzzer │              │           │
+│  └────────────┘              │           │
+└────────┬─────────────────────┼───────────┘
+         │ TCP 3306            │ HTTP/WS
+         ▼                     ▼
+   ┌──────────┐         ┌─────────────┐
+   │  MySQL   │         │  Navegador  │
+   │ (PC/LAN) │         │  Dashboard  │
+   └──────────┘         └─────────────┘
 ```
 
 ### Flujo de datos
 
-1. El ESP32 lee los sensores en tiempo real.
-2. Al detectar una condición de alerta, envía un `POST /api/alert` al backend.
-3. El backend persiste la alerta en MySQL y emite un evento por Socket.IO.
-4. Todos los dashboards conectados reciben la alerta instantáneamente.
-5. El ESP32 consulta periódicamente el estado de la alarma (`GET /api/estado-alarma`) para saber si debe seguir activando el LED y el buzzer.
-6. El usuario puede apagar la alarma desde el dashboard o desde un botón físico en la protoboard.
+1. El ESP32 lee los sensores cada 2 segundos.
+2. Al detectar una condicion de alerta, hace `INSERT` directo en MySQL via TCP/3306.
+3. Inmediatamente despues, emite por WebSocket el evento `nueva-alerta` a todos los dashboards conectados.
+4. El dashboard recibe el evento y actualiza la UI sin recargar.
+5. El usuario puede apagar la alarma desde el dashboard (mensaje WS `apagar-alarma`) o desde el boton fisico.
 
 ---
 
 ## ✨ Características
 
-- 📡 **Comunicación en tiempo real** mediante WebSockets (Socket.IO)
+- 🔌 **Todo corre en el ESP32** — UI, logica, comunicacion, persistencia (la BD es lo unico externo)
+- 📡 **Comunicacion en tiempo real** mediante WebSocket nativo
 - 💾 **Persistencia en MySQL** con historial completo de alertas
+- 📁 **UI servida desde LittleFS** (HTML, CSS, JS embebidos en el ESP32)
 - 🎨 **Dashboard moderno** con tema oscuro tipo panel de control
-- 🔄 **Actualización automática** del estado de los sensores sin recargar
-- 🚨 **Sistema de severidades** (baja, media, alta, crítica)
-- 🔕 **Control remoto** de la alarma física desde la web
-- 🤖 **Simulador integrado** que emula al ESP32 para desarrollo y demos
-- 📱 **Diseño responsive** para móvil y desktop
+- 🚨 **Sistema de severidades** (baja, media, alta, critica)
+- 🔕 **Doble control de alarma** (web o boton fisico)
+- 📱 **Diseño responsive** para movil y desktop
 
 ---
 
 ## 🛠️ Stack tecnológico
 
-### Backend
-- **Node.js** v24+
-- **Express** — framework web
-- **Socket.IO** — comunicación en tiempo real
-- **mysql2** — driver de MySQL con soporte de Promises
-- **dotenv** — manejo de variables de entorno
-- **cors** — habilita peticiones del ESP32
+### Firmware (ESP32, C++)
+- **Arduino framework** (Arduino IDE o PlatformIO)
+- **ESPAsyncWebServer** — servidor HTTP y WebSocket
+- **AsyncTCP** — base de red asincrona
+- **LittleFS** — sistema de archivos para servir la UI
+- **MySQL_MariaDB_Generic** (khoih-prog) — cliente MySQL nativo
+- **ArduinoJson** — serializacion de mensajes WS
+- **DHT sensor library** (Adafruit) — DHT22
 
-### Frontend
+### Frontend (servido desde LittleFS)
 - **HTML5 + CSS3** (vanilla)
 - **JavaScript** (sin frameworks)
-- **Socket.IO Client**
+- **WebSocket API** del navegador
 
 ### Base de datos
-- **MySQL 8+**
-
-### Hardware (por implementar)
-- **ESP32 DOIT DEV KIT V1** (30 pines)
-- **Arduino IDE** / **PlatformIO**
+- **MySQL 8+** (o MariaDB)
 
 ---
 
 ## 📦 Requisitos previos
 
-Antes de instalar, asegúrate de tener:
-
-- [Node.js](https://nodejs.org/) v18 o superior
-- [MySQL Server](https://dev.mysql.com/downloads/) o XAMPP
-- [Git](https://git-scm.com/)
-- Cliente MySQL (MySQL Workbench, phpMyAdmin, DBeaver, etc.)
-
-Verifica las versiones:
-
-```bash
-node --version    # v18+
-npm --version     # v9+
-mysql --version   # 8+
-```
+- **ESP32 DOIT DEV KIT V1** (30 pines)
+- **MySQL Server** o **MariaDB** corriendo en la LAN
+- **PlatformIO** (recomendado) o **Arduino IDE** con soporte de ESP32
+- Cliente MySQL para crear la BD (MySQL Workbench, DBeaver, phpMyAdmin, etc.)
 
 ---
 
 ## 🚀 Instalación
 
-### 1. Clonar el repositorio
+### 1. Configurar la base de datos
 
-```bash
-git clone https://github.com/TU_USUARIO/CasaInteligenteWeb.git
-cd CasaInteligenteWeb/backend
-```
-
-### 2. Instalar dependencias
-
-```bash
-npm install
-```
-
-### 3. Configurar la base de datos
-
-Abre MySQL Workbench (o tu cliente preferido) y ejecuta el siguiente script:
+En tu servidor MySQL, ejecuta el siguiente script:
 
 ```sql
 -- Crear la base de datos
@@ -170,169 +151,111 @@ CREATE TABLE IF NOT EXISTS estado_sistema (
 INSERT IGNORE INTO estado_sistema (id, alarma_activa) VALUES (1, FALSE);
 ```
 
-### 4. Configurar variables de entorno
+### 2. Crear un usuario MySQL compatible con el ESP32
 
-Crea un archivo `.env` en la carpeta `backend/` con el siguiente contenido:
+> ⚠️ **Importante:** la libreria `MySQL_MariaDB_Generic` **solo soporta `mysql_native_password`**. MySQL 8 usa por defecto `caching_sha2_password`, asi que hay que crear un usuario explicitamente con el plugin antiguo:
 
-```env
-# Servidor
-PORT=3000
-
-# MySQL
-DB_HOST=localhost
-DB_PORT=3306
-DB_USER=root
-DB_PASSWORD=tu_password_de_mysql
-DB_NAME=casa_inteligente
+```sql
+CREATE USER 'esp32'@'%' IDENTIFIED WITH mysql_native_password BY 'esp32pass';
+GRANT ALL PRIVILEGES ON casa_inteligente.* TO 'esp32'@'%';
+FLUSH PRIVILEGES;
 ```
 
-> ⚠️ **Importante:** el archivo `.env` contiene tu contraseña de MySQL. **Nunca lo subas a Git**. El `.gitignore` ya está configurado para ignorarlo.
+Y asegura que MySQL acepta conexiones remotas. En `my.cnf` / `my.ini`:
 
-### 5. Iniciar el servidor
+```ini
+bind-address = 0.0.0.0
+```
 
-**Modo desarrollo** (con auto-reload al modificar archivos):
+Reinicia el servicio de MySQL y abre el puerto 3306 en el firewall.
+
+### 3. Configurar credenciales del firmware
+
+Copia la plantilla:
 
 ```bash
-npm run dev
+cp firmware/config.h.example firmware/config.h
 ```
 
-**Modo producción:**
+Edita `firmware/config.h` con los datos de tu red y de MySQL:
+
+```c
+#define WIFI_SSID     "MiRedWiFi"
+#define WIFI_PASS     "passwordwifi"
+
+#define MYSQL_HOST    "192.168.1.100"   // IP de la PC con MySQL
+#define MYSQL_PORT    3306
+#define MYSQL_USER    "esp32"
+#define MYSQL_PASS    "esp32pass"
+#define MYSQL_DB      "casa_inteligente"
+```
+
+> El archivo `config.h` esta en `.gitignore` para que las credenciales no terminen en el repo.
+
+### 4. Compilar y subir
+
+#### Opcion A — PlatformIO (recomendado)
 
 ```bash
-npm start
+cd firmware
+
+# Compilar y subir el sketch
+pio run -t upload
+
+# Subir la UI a LittleFS
+pio run -t uploadfs
+
+# Monitor serie
+pio device monitor
 ```
 
-Si todo está bien configurado, deberías ver:
+#### Opcion B — Arduino IDE
+
+1. Instala el soporte de ESP32 (Boards Manager).
+2. Instala las librerias desde el Library Manager:
+   - `ESPAsyncWebServer` (me-no-dev)
+   - `AsyncTCP` (me-no-dev)
+   - `ArduinoJson`
+   - `DHT sensor library` (Adafruit)
+   - `Adafruit Unified Sensor`
+   - `MySQL_MariaDB_Generic`
+3. Instala el plugin **ESP32 LittleFS Data Upload** para subir la carpeta `data/`.
+4. Selecciona la board **ESP32 Dev Module**.
+5. Sube el sketch (`Upload`) y luego sube los archivos de `data/` con **Tools → ESP32 LittleFS Data Upload**.
+
+### 5. Abrir el dashboard
+
+Una vez en marcha, el monitor serie mostrara la IP que el ESP32 tomo del DHCP:
 
 ```
-✅ Conexión a MySQL exitosa
-🏠 Servidor Casa Inteligente corriendo en http://localhost:3000
-📊 Dashboard: http://localhost:3000
-🔌 API: http://localhost:3000/api
-📡 WebSockets habilitados
+✅ WiFi OK. IP: 192.168.1.55
+✅ Conectado a MySQL
+🏠 Servidor HTTP/WS arriba en puerto 80
+Dashboard: http://192.168.1.55/
 ```
 
-### 6. Abrir el dashboard
-
-Abre en tu navegador:
-
-```
-http://localhost:3000
-```
+Abre esa URL en cualquier navegador conectado a la misma red.
 
 ---
 
-## 🎮 Uso
+## 🔌 Protocolo WebSocket
 
-### Dashboard web
+Toda la comunicacion entre el navegador y el ESP32 va por un solo WebSocket en `ws://<ip-esp32>/ws`. Los mensajes son JSON con el campo `tipo`.
 
-El dashboard muestra:
+### Del ESP32 al navegador
 
-- **Estado general del sistema** (normal / alarma activa)
-- **Tarjetas de sensores** que cambian de color cuando detectan una alerta
-- **Historial de alertas** ordenado cronológicamente con severidades
-- **Botón de apagado** de la alarma que se habilita cuando hay una alerta activa
+| Tipo | Payload | Cuando |
+|---|---|---|
+| `historial` | `[ {alerta}, ... ]` | Al conectar (ultimas 50 alertas) o al pedirlo |
+| `nueva-alerta` | `{ id, sensor, tipo, mensaje, valor, severidad, fecha }` | Sensor dispara una alerta |
+| `estado-alarma` | `{ alarma_activa: bool }` | Cambia el estado de la alarma |
 
-### Simulador del ESP32
+### Del navegador al ESP32
 
-Mientras no tengas el hardware físico, puedes usar el simulador para probar el sistema completo.
-
-**Modo automático** (envía alertas aleatorias cada 15 segundos):
-
-```bash
-node simulador.js
-```
-
-**Modo automático con intervalo personalizado** (ej: cada 3 segundos):
-
-```bash
-node simulador.js auto 3
-```
-
-**Modo manual** (disparas alertas a voluntad desde el teclado):
-
-```bash
-node simulador.js manual
-```
-
-En modo manual verás un menú interactivo:
-
-```
-┌─────────────────────────────────────────┐
-│        SIMULADOR ESP32 - MANUAL         │
-├─────────────────────────────────────────┤
-│  1 → DHT22 (temperatura/humedad)        │
-│  2 → MQ2 (gas/humo)                     │
-│  3 → REED (puerta)                      │
-│  4 → PIR (movimiento)                   │
-│  5 → Alerta aleatoria                   │
-│  q → Salir                              │
-└─────────────────────────────────────────┘
-```
-
----
-
-## 🔌 Endpoints de la API
-
-### `GET /api/health`
-Verifica que el servidor y la base de datos estén funcionando.
-
-**Respuesta:**
-```json
-{ "status": "ok", "mensaje": "Servidor y BD funcionando" }
-```
-
-### `POST /api/alert`
-Recibe una alerta desde el ESP32 (o el simulador).
-
-**Body:**
-```json
-{
-  "sensor": "MQ2",
-  "tipo": "gas_detectado",
-  "mensaje": "Nivel de gas peligroso",
-  "valor": "850 ppm",
-  "severidad": "critica"
-}
-```
-
-**Respuesta:** `201 Created` con la alerta registrada.
-
-### `GET /api/alerts`
-Devuelve el historial de alertas.
-
-**Query params opcionales:**
-- `limite` — número máximo de alertas (default: 50)
-
-**Respuesta:**
-```json
-{
-  "ok": true,
-  "alertas": [ { "id": 1, "sensor": "MQ2", ... } ]
-}
-```
-
-### `GET /api/estado-alarma`
-Consulta si la alarma física debe estar activa. Lo usa el ESP32 mediante polling.
-
-**Respuesta:**
-```json
-{ "ok": true, "alarma_activa": true }
-```
-
-### `POST /api/alarma/apagar`
-Apaga la alarma desde el dashboard o desde el botón físico del ESP32.
-
-**Respuesta:**
-```json
-{ "ok": true, "mensaje": "Alarma apagada" }
-```
-
-### Eventos de Socket.IO
-
-**Del servidor al cliente:**
-- `nueva-alerta` — se emite cuando entra una alerta nueva
-- `estado-alarma` — se emite cuando cambia el estado de la alarma
+| Tipo | Cuando |
+|---|---|
+| `apagar-alarma` | Usuario presiona el boton de apagar |
+| `pedir-historial` | Refrescar la lista manualmente |
 
 ---
 
@@ -340,22 +263,19 @@ Apaga la alarma desde el dashboard o desde el botón físico del ESP32.
 
 ```
 CasaInteligenteWeb/
-├── backend/
-│   ├── public/                    # Frontend (servido estáticamente)
-│   │   ├── css/
-│   │   │   └── style.css          # Estilos del dashboard
-│   │   ├── js/
-│   │   │   └── app.js             # Lógica del cliente
-│   │   └── index.html             # Dashboard
-│   ├── .env                       # Variables de entorno (NO subir a Git)
-│   ├── .gitignore
-│   ├── db.js                      # Configuración de conexión a MySQL
-│   ├── server.js                  # Servidor principal (Express + Socket.IO)
-│   ├── simulador.js               # Simulador del ESP32
-│   ├── package.json
-│   └── package-lock.json
-├── firmware/                      # Código del ESP32 (próximamente)
-│   └── casa_inteligente.ino
+├── firmware/
+│   ├── casa_inteligente.ino    # Sketch principal del ESP32
+│   ├── platformio.ini          # Configuracion de PlatformIO
+│   ├── config.h.example        # Plantilla de credenciales
+│   ├── config.h                # Credenciales reales (NO subir a Git)
+│   └── data/                   # Se sube a LittleFS
+│       ├── index.html          # Dashboard
+│       ├── css/
+│       │   └── style.css       # Estilos
+│       └── js/
+│           └── app.js          # Logica del dashboard (WebSocket)
+├── .gitignore
+├── LICENSE
 └── README.md
 ```
 
@@ -365,13 +285,13 @@ CasaInteligenteWeb/
 
 ### Componentes utilizados
 
-| Componente | Modelo | Función |
+| Componente | Modelo | Funcion |
 |---|---|---|
 | Microcontrolador | ESP32 DOIT DEV KIT V1 (30 pines) | Cerebro del sistema |
-| Sensor de temperatura/humedad | DHT22 | Detección de temperatura alta |
-| Sensor de gas | MQ-2 | Detección de gas / humo |
-| Sensor magnético | Reed switch + imán | Detección de apertura de puerta |
-| Sensor de movimiento | PIR HC-SR501 | Detección de presencia |
+| Sensor de temperatura/humedad | DHT22 | Deteccion de temperatura alta |
+| Sensor de gas | MQ-2 | Deteccion de gas / humo |
+| Sensor magnetico | Reed switch + iman | Deteccion de apertura de puerta |
+| Sensor de movimiento | PIR HC-SR501 | Deteccion de presencia |
 | Actuador visual | LED rojo 5mm | Alarma visual |
 | Actuador sonoro | Buzzer activo 5V | Alarma sonora |
 | Control local | Push button | Apagar alarma localmente |
@@ -386,44 +306,10 @@ CasaInteligenteWeb/
 | PIR HC-SR501 | GPIO 26 | Digital in |
 | LED rojo | GPIO 2 | Digital out |
 | Buzzer | GPIO 15 | Digital out |
-| Botón reset | GPIO 14 | Digital in (pull-up) |
-
----
-
-## 🤖 Simulador del ESP32
-
-El simulador emula fielmente el comportamiento del ESP32 real:
-
-- Envía alertas a `POST /api/alert` como lo haría el microcontrolador
-- Hace polling cada 2 segundos a `GET /api/estado-alarma` para conocer el estado de la alarma
-- Genera valores realistas para cada sensor (ppm de gas, °C, %, etc.)
-- Soporta los 4 sensores con múltiples escenarios de alerta por cada uno
-- Muestra logs en consola con timestamps y colores
-
-Esto permite desarrollar y presentar el sistema completo **sin necesidad del hardware**.
-
----
-
-## 🗺️ Roadmap
-
-- [x] Backend con API REST
-- [x] Base de datos MySQL con persistencia
-- [x] WebSockets para tiempo real
-- [x] Dashboard web con tema oscuro
-- [x] Simulador del ESP32
-- [ ] Firmware del ESP32
-- [ ] Armado físico del circuito
-- [ ] Pruebas con sensores reales
-- [ ] Documentación de instalación del hardware
+| Boton reset | GPIO 14 | Digital in (pull-up, interrupt) |
 
 ---
 
 ## 📝 Licencia
 
-Proyecto académico desarrollado para la materia de **Sistemas Empotrados**.
-
----
-
-## 👤 Autor
-
-Desarrollado como proyecto final universitario.
+Proyecto academico desarrollado para la materia de **Sistemas Empotrados**.
