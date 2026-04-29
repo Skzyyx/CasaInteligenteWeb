@@ -63,11 +63,11 @@ let alarmaActiva = false;
 
 // ===== MAPEO VISUAL DE SENSORES =====
 const ICONOS_SENSOR = {
-    DHT22: '🌡️', DHT11: '🌡️', MQ2: '💨', REED: '🚪', PIR: '👁️', default: '📡'
+    DHT22: '🌡️', DHT11: '🌡️', MQ2: '💨', RFID: '🔑', PIR: '👁️', default: '📡'
 };
 
 const ESTADO_NORMAL_SENSOR = {
-    DHT22: 'Normal', MQ2: 'Normal', REED: 'Cerrada', PIR: 'Sin actividad'
+    DHT22: 'Normal', MQ2: 'Normal', RFID: 'Sin actividad', PIR: 'Sin actividad'
 };
 
 // ===== UTILIDADES =====

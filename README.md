@@ -21,11 +21,13 @@ Sistema de monitoreo y alertas en tiempo real para una casa inteligente, desarro
 
 ## 📖 Descripción
 
-El sistema monitorea cuatro tipos de sensores ambientales y de seguridad. Cuando alguno detecta una condicion anormal (temperatura excesiva, gas, apertura de puerta, movimiento), el ESP32:
+El sistema monitorea sensores ambientales (temperatura/humedad, gas, movimiento) y un punto de acceso con lector RFID + servomotor. Cuando alguno detecta una condicion anormal (temperatura excesiva, gas, intento de acceso no autorizado, movimiento), el ESP32:
 
 1. Persiste la alerta en MySQL.
 2. La transmite instantaneamente a todos los dashboards conectados via WebSocket.
 3. Activa la alarma fisica (LED + buzzer).
+
+Cuando se presenta una tarjeta RFID autorizada, el ESP32 acciona el servomotor para abrir la cerradura por unos segundos y registra el acceso en el dashboard sin disparar la alarma.
 
 Desde la pagina web —servida por el propio ESP32— se ve el historial, el estado en tiempo real y se puede apagar la alarma. Tambien existe un boton fisico en la protoboard para apagarla localmente.
 
@@ -38,9 +40,9 @@ Desde la pagina web —servida por el propio ESP32— se ve el historial, el est
 │              ESP32 DOIT V1               │
 │                                          │
 │  ┌────────────┐    ┌──────────────────┐  │
-│  │ 4 Sensores │    │ Servidor HTTP+WS │  │
+│  │ Sensores   │    │ Servidor HTTP+WS │  │
 │  │ DHT22, MQ2 │    │ (AsyncWebServer) │  │
-│  │ REED, PIR  │    │                  │  │
+│  │ PIR, RFID  │    │                  │  │
 │  └─────┬──────┘    │ UI desde         │  │
 │        │           │ LittleFS         │  │
 │  ┌─────▼──────┐    └─────────┬────────┘  │
@@ -48,10 +50,11 @@ Desde la pagina web —servida por el propio ESP32— se ve el historial, el est
 │  │ (alertas)  │◄─────WS──────┤           │
 │  └─────┬──────┘              │           │
 │        │                     │           │
-│  ┌─────▼──────┐              │           │
-│  │ Actuadores │              │           │
-│  │ LED+Buzzer │              │           │
-│  └────────────┘              │           │
+│  ┌─────▼─────────┐           │           │
+│  │ Actuadores    │           │           │
+│  │ LED + Buzzer  │           │           │
+│  │ Servo cerrad. │           │           │
+│  └───────────────┘           │           │
 └────────┬─────────────────────┼───────────┘
          │ TCP 3306            │ HTTP/WS
          ▼                     ▼
@@ -150,6 +153,19 @@ CREATE TABLE IF NOT EXISTS estado_sistema (
 
 -- Fila inicial de estado
 INSERT IGNORE INTO estado_sistema (id, alarma_activa) VALUES (1, FALSE);
+
+-- Tabla de tarjetas RFID autorizadas
+CREATE TABLE IF NOT EXISTS tarjetas_autorizadas (
+  uid VARCHAR(20) PRIMARY KEY,
+  nombre VARCHAR(100) NOT NULL,
+  habilitada BOOLEAN NOT NULL DEFAULT TRUE,
+  creada DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Tarjetas de prueba (reemplaza los UID por los reales de tus tags)
+INSERT IGNORE INTO tarjetas_autorizadas (uid, nombre) VALUES
+  ('A1B2C3D4', 'Jose Eduardo'),
+  ('11223344', 'Admin');
 ```
 
 ### 2. Crear un usuario MySQL compatible con el ESP32
@@ -260,7 +276,7 @@ En `firmware/config.h` (que copiaste de la plantilla):
 
 ### Que hace
 
-- Cada `INTERVALO_SIMULADOR_MS` el ESP32 escoge aleatoriamente uno de los 11 escenarios de alerta (DHT22, MQ2, REED, PIR con sus variantes y severidades) y dispara la alerta como si viniera de un sensor real.
+- Cada `INTERVALO_SIMULADOR_MS` el ESP32 escoge aleatoriamente uno de los 11 escenarios de alerta (DHT22, MQ2, RFID, PIR con sus variantes y severidades) y dispara la alerta como si viniera de un sensor real.
 - Salta el cooldown por sensor para que las demos fluyan sin huecos.
 - El boton fisico sigue funcionando (apagar alarma) pero ya no es necesario; tambien lo apagas desde la UI.
 
@@ -322,8 +338,9 @@ CasaInteligenteWeb/
 | Microcontrolador | ESP32 DOIT DEV KIT V1 (30 pines) | Cerebro del sistema |
 | Sensor de temperatura/humedad | DHT22 | Deteccion de temperatura alta |
 | Sensor de gas | MQ-2 | Deteccion de gas / humo |
-| Sensor magnetico | Reed switch + iman | Deteccion de apertura de puerta |
+| Lector RFID | RC522 (MFRC522, SPI, 3.3 V) | Identificacion de usuario para acceso |
 | Sensor de movimiento | PIR HC-SR501 | Deteccion de presencia |
+| Cerradura | Servomotor SG90 | Abre la puerta tras un acceso autorizado |
 | Actuador visual | LED rojo 5mm | Alarma visual |
 | Actuador sonoro | Buzzer activo 5V | Alarma sonora |
 | Control local | Push button | Apagar alarma localmente |
@@ -334,11 +351,18 @@ CasaInteligenteWeb/
 |---|---|---|
 | DHT22 | GPIO 4 | Digital |
 | MQ-2 (DO) | GPIO 34 | Digital in |
-| Reed switch | GPIO 27 | Digital in (pull-up) |
 | PIR HC-SR501 | GPIO 26 | Digital in |
 | LED rojo | GPIO 2 | Digital out |
 | Buzzer | GPIO 15 | Digital out |
 | Boton reset | GPIO 14 | Digital in (pull-up, interrupt) |
+| Servo cerradura | GPIO 27 | PWM |
+| RC522 SDA / SS | GPIO 5 | SPI CS |
+| RC522 RST | GPIO 22 | Digital out |
+| RC522 SCK | GPIO 18 | SPI clock |
+| RC522 MOSI | GPIO 23 | SPI |
+| RC522 MISO | GPIO 19 | SPI |
+
+> ⚠️ El RC522 trabaja a **3.3 V** (no lo conectes a 5 V). El servomotor SG90 conviene alimentarlo con una fuente externa de 5 V con GND comun al ESP32 para evitar caidas de tension.
 
 ---
 

@@ -2,8 +2,9 @@
 //  Casa Inteligente - Firmware ESP32
 // =============================================================
 //  Funciones:
-//   - Lectura de sensores (DHT22, MQ-2, REED, PIR)
-//   - Activacion de actuadores (LED, buzzer)
+//   - Lectura de sensores (DHT22, MQ-2, PIR)
+//   - Lector RFID RC522 para control de acceso
+//   - Activacion de actuadores (LED, buzzer, servomotor de cerradura)
 //   - Servidor web sirviendo la UI desde LittleFS
 //   - WebSocket para comunicacion en tiempo real con el dashboard
 //   - Persistencia de alertas en MySQL externo
@@ -15,6 +16,9 @@
 #include <AsyncTCP.h>
 #include <ArduinoJson.h>
 #include <DHT.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <ESP32Servo.h>
 #include <MySQL_Generic.h>
 #include "config.h"
 
@@ -27,13 +31,16 @@
 #endif
 
 // ===== PINES =====
-#define PIN_DHT       4
-#define PIN_MQ2      34
-#define PIN_REED     27
-#define PIN_PIR      26
-#define PIN_LED       2
-#define PIN_BUZZER   15
-#define PIN_BOTON    14
+#define PIN_DHT        4
+#define PIN_MQ2       34
+#define PIN_PIR       26
+#define PIN_LED        2
+#define PIN_BUZZER    15
+#define PIN_BOTON     14
+#define PIN_SERVO     27
+#define PIN_RC522_SS   5
+#define PIN_RC522_RST 22
+// SPI por defecto del ESP32: SCK=18, MISO=19, MOSI=23
 
 #define DHT_TIPO   DHT22
 
@@ -47,6 +54,11 @@
 #define INTERVALO_LECTURA  2000    // ms
 // Cooldown entre alertas del mismo sensor para no saturar la BD
 #define COOLDOWN_ALERTA    10000   // ms
+// Tiempo que la cerradura permanece abierta tras un acceso autorizado
+#define TIEMPO_PUERTA_MS   5000
+// Posiciones del servo de la cerradura
+#define SERVO_CERRADO      0
+#define SERVO_ABIERTO      90
 
 // ===== OBJETOS GLOBALES =====
 DHT dht(PIN_DHT, DHT_TIPO);
@@ -57,14 +69,17 @@ WiFiClient clienteSql;
 MySQL_Connection conn((Client *)&clienteSql);
 IPAddress ipServidorSql;
 
+MFRC522 rfid(PIN_RC522_SS, PIN_RC522_RST);
+Servo cerradura;
+
 // ===== ESTADO =====
 volatile bool alarmaActiva = false;
 unsigned long ultimaLectura = 0;
-unsigned long ultimaAlerta[4] = { 0, 0, 0, 0 }; // DHT22, MQ2, REED, PIR
+unsigned long ultimaAlerta[4] = { 0, 0, 0, 0 }; // DHT22, MQ2, RFID, PIR
 unsigned long ultimoBoton = 0;
+unsigned long puertaAbiertaDesde = 0;
 
 // Estado anterior de los sensores digitales para detectar flancos
-int reedAnterior = HIGH;
 int pirAnterior = LOW;
 
 // =============================================================
@@ -116,7 +131,8 @@ void asegurarSql() {
 //  PERSISTENCIA DE ALERTAS
 // =============================================================
 bool guardarAlerta(const String &sensor, const String &tipo, const String &mensaje,
-                   const String &valor, const String &severidad, long &idGenerado, String &fechaOut) {
+                   const String &valor, const String &severidad, long &idGenerado, String &fechaOut,
+                   bool marcarAlarma = true) {
     asegurarSql();
     if (!conn.connected()) return false;
 
@@ -132,9 +148,10 @@ bool guardarAlerta(const String &sensor, const String &tipo, const String &mensa
         return false;
     }
 
-    // Marcar la alarma como activa
-    MySQL_Query updEstado = MySQL_Query(&conn);
-    updEstado.execute("UPDATE estado_sistema SET alarma_activa = TRUE WHERE id = 1");
+    if (marcarAlarma) {
+        MySQL_Query updEstado = MySQL_Query(&conn);
+        updEstado.execute("UPDATE estado_sistema SET alarma_activa = TRUE WHERE id = 1");
+    }
 
     // Recuperar el id y fecha que MySQL acaba de generar
     MySQL_Query sel = MySQL_Query(&conn);
@@ -208,7 +225,8 @@ void apagarAlarmaPersistente() {
 //  EMITIR NUEVA ALERTA POR WEBSOCKET
 // =============================================================
 void disparar(const String &sensor, const String &tipo, const String &mensaje,
-              const String &valor, const String &severidad, int idxCooldown) {
+              const String &valor, const String &severidad, int idxCooldown,
+              bool activarAlarma = true) {
     unsigned long ahora = millis();
 #if !MODO_SIMULADOR
     if (ahora - ultimaAlerta[idxCooldown] < COOLDOWN_ALERTA) return;
@@ -217,12 +235,14 @@ void disparar(const String &sensor, const String &tipo, const String &mensaje,
 
     long id = 0;
     String fecha = "";
-    bool ok = guardarAlerta(sensor, tipo, mensaje, valor, severidad, id, fecha);
+    bool ok = guardarAlerta(sensor, tipo, mensaje, valor, severidad, id, fecha, activarAlarma);
 
     Serial.printf("🚨 [%s] %s (%s)\n", sensor.c_str(), mensaje.c_str(), valor.c_str());
 
-    alarmaActiva = true;
-    controlActuadores();
+    if (activarAlarma) {
+        alarmaActiva = true;
+        controlActuadores();
+    }
 
     StaticJsonDocument<512> doc;
     doc["tipo"] = "nueva-alerta";
@@ -240,6 +260,73 @@ void disparar(const String &sensor, const String &tipo, const String &mensaje,
 
     emitirEstadoAlarma();
     (void)ok;
+}
+
+// =============================================================
+//  PUERTA: SERVO + RFID
+// =============================================================
+void abrirPuerta() {
+    cerradura.write(SERVO_ABIERTO);
+    puertaAbiertaDesde = millis();
+}
+
+void cerrarPuertaSiToca() {
+    if (puertaAbiertaDesde != 0 && millis() - puertaAbiertaDesde > TIEMPO_PUERTA_MS) {
+        cerradura.write(SERVO_CERRADO);
+        puertaAbiertaDesde = 0;
+    }
+}
+
+String leerUID() {
+    String uid = "";
+    for (byte i = 0; i < rfid.uid.size; i++) {
+        if (rfid.uid.uidByte[i] < 0x10) uid += "0";
+        uid += String(rfid.uid.uidByte[i], HEX);
+    }
+    uid.toUpperCase();
+    return uid;
+}
+
+bool tarjetaAutorizada(const String &uid, String &nombreOut) {
+    asegurarSql();
+    if (!conn.connected()) return false;
+
+    char q[160];
+    snprintf(q, sizeof(q),
+        "SELECT nombre FROM tarjetas_autorizadas WHERE uid='%s' AND habilitada=TRUE LIMIT 1",
+        escapar(uid).c_str());
+
+    MySQL_Query consulta = MySQL_Query(&conn);
+    if (!consulta.execute(q)) return false;
+    column_names *cols = consulta.get_columns();
+    (void)cols;
+    row_values *fila = consulta.get_next_row();
+    if (fila != NULL && fila->values[0] != NULL) {
+        nombreOut = String(fila->values[0]);
+        return true;
+    }
+    return false;
+}
+
+void revisarRFID() {
+    if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) return;
+
+    String uid = leerUID();
+    String nombre = "";
+    bool ok = tarjetaAutorizada(uid, nombre);
+
+    if (ok) {
+        Serial.printf("✅ Acceso autorizado: %s (%s)\n", nombre.c_str(), uid.c_str());
+        abrirPuerta();
+        disparar("RFID", "acceso_autorizado",
+                 "Entrada de " + nombre, uid, "baja", 2, false);
+    } else {
+        Serial.printf("❌ Tarjeta no autorizada: %s\n", uid.c_str());
+        disparar("RFID", "acceso_denegado",
+                 "Intento de acceso con tarjeta desconocida", uid, "alta", 2);
+    }
+
+    rfid.PICC_HaltA();
 }
 
 // =============================================================
@@ -289,13 +376,14 @@ void simularLectura() {
             break;
         }
         case 6:
-            disparar("REED", "puerta_abierta", "Puerta principal abierta", "abierta", "media", 2);
+            abrirPuerta();
+            disparar("RFID", "acceso_autorizado", "Entrada de Jose Eduardo", "A1B2C3D4", "baja", 2, false);
             break;
         case 7:
-            disparar("REED", "puerta_forzada", "¡Posible intrusion detectada!", "forzada", "critica", 2);
+            disparar("RFID", "acceso_denegado", "Intento de acceso con tarjeta desconocida", "DEADBEEF", "alta", 2);
             break;
         case 8:
-            disparar("REED", "ventana_abierta", "Ventana de cocina abierta", "abierta", "baja", 2);
+            disparar("RFID", "intentos_multiples", "Multiples intentos fallidos consecutivos", "00112233", "critica", 2);
             break;
         case 9:
             disparar("PIR", "movimiento_detectado", "Movimiento detectado en sala", "detectado", "media", 3);
@@ -333,14 +421,6 @@ void leerSensores() {
         disparar("MQ2", "gas_detectado", "Concentracion de gas detectada",
                  "umbral", "critica", 1);
     }
-
-    // ----- REED (cerrada = LOW con pull-up + iman) -----
-    int reed = digitalRead(PIN_REED);
-    if (reed == HIGH && reedAnterior == LOW) {
-        disparar("REED", "puerta_abierta", "Puerta principal abierta",
-                 "abierta", "media", 2);
-    }
-    reedAnterior = reed;
 
     // ----- PIR -----
     int pir = digitalRead(PIN_PIR);
@@ -460,7 +540,6 @@ void setup() {
     randomSeed(micros());
 
     pinMode(PIN_MQ2, INPUT);
-    pinMode(PIN_REED, INPUT_PULLUP);
     pinMode(PIN_PIR, INPUT);
     pinMode(PIN_LED, OUTPUT);
     pinMode(PIN_BUZZER, OUTPUT);
@@ -471,6 +550,12 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(PIN_BOTON), isrBoton, FALLING);
 
     dht.begin();
+
+    SPI.begin();
+    rfid.PCD_Init();
+    cerradura.attach(PIN_SERVO);
+    cerradura.write(SERVO_CERRADO);
+
     montarFs();
     conectarWifi();
 
@@ -497,6 +582,7 @@ void setup() {
 void loop() {
     ws.cleanupClients();
     revisarBoton();
+    cerrarPuertaSiToca();
 
 #if MODO_SIMULADOR
     if (millis() - ultimaLectura >= INTERVALO_SIMULADOR_MS) {
@@ -504,6 +590,7 @@ void loop() {
         simularLectura();
     }
 #else
+    revisarRFID();
     if (millis() - ultimaLectura >= INTERVALO_LECTURA) {
         ultimaLectura = millis();
         leerSensores();
