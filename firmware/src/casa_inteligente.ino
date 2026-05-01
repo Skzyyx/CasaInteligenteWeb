@@ -10,6 +10,7 @@
 //   - Persistencia de alertas en MySQL externo
 // =============================================================
 
+#include <Arduino.h>
 #include <WiFi.h>
 #include <LittleFS.h>
 #include <ESPAsyncWebServer.h>
@@ -112,7 +113,7 @@ void emitirEstadoAlarma() {
 bool conectarSql() {
     if (conn.connected()) return true;
 
-    MYSQL_LOGLN("Conectando a MySQL...");
+    Serial.println("Conectando a MySQL...");
     if (conn.connect(ipServidorSql, MYSQL_PORT, MYSQL_USER, MYSQL_PASS, MYSQL_DB)) {
         Serial.println("✅ Conectado a MySQL");
         return true;
@@ -527,7 +528,7 @@ void montarFs() {
     Serial.println("✅ LittleFS montado");
 }
 
-// =============================================================
+// ===============================================P==============
 //  SETUP / LOOP
 // =============================================================
 void setup() {
