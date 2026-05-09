@@ -32,13 +32,14 @@
 #endif
 
 // ===== PINES =====
-#define PIN_DHT        4
-#define PIN_MQ2       34
-#define PIN_PIR       26
+// Validados con los sketches de prueba individuales (test_mq6, test_pir, etc.)
+#define PIN_DHT        4   // DHT11 (alimentar a 3.3V)
+#define PIN_MQ2       34   // MQ-6 D0 (alimentar a 5V/VIN)
+#define PIN_PIR       27   // HC-SR501 OUT (alimentar a 5V/VIN)
 #define PIN_LED        2
 #define PIN_BUZZER    15
 #define PIN_BOTON     14
-#define PIN_SERVO     27
+#define PIN_SERVO     13   // Movido de 27 a 13 porque el PIR ocupa el 27
 #define PIN_RC522_SS   5
 #define PIN_RC522_RST 22
 // SPI por defecto del ESP32: SCK=18, MISO=19, MOSI=23
@@ -47,7 +48,7 @@
 #define DHT_TIPO   DHT11
 
 // ===== UMBRALES =====
-#define TEMP_ALTA          28.0    // grados Celsius
+#define TEMP_ALTA          30.0    // grados Celsius
 #define TEMP_CRITICA       38.0
 #define HUMEDAD_ALTA       65.0    // porcentaje
 #define DEBOUNCE_MS        300
@@ -564,7 +565,7 @@ void setup() {
     randomSeed(micros());
 
     pinMode(PIN_MQ2, INPUT);
-    pinMode(PIN_PIR, INPUT_PULLDOWN);  // Pull-down: si PIR no esta cableado, lee LOW estable
+    pinMode(PIN_PIR, INPUT);           // Igual que el sketch de prueba que ya valido: HC-SR501 maneja la linea activamente
     pinMode(PIN_LED, OUTPUT);
     pinMode(PIN_BUZZER, OUTPUT);
     pinMode(PIN_BOTON, INPUT_PULLUP);

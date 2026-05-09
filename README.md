@@ -336,8 +336,8 @@ CasaInteligenteWeb/
 | Componente | Modelo | Funcion |
 |---|---|---|
 | Microcontrolador | ESP32 DOIT DEV KIT V1 (30 pines) | Cerebro del sistema |
-| Sensor de temperatura/humedad | DHT22 | Deteccion de temperatura alta |
-| Sensor de gas | MQ-2 | Deteccion de gas / humo |
+| Sensor de temperatura/humedad | DHT11 (modulo azul) | Deteccion de temperatura alta |
+| Sensor de gas | MQ-6 | Deteccion de gas LP / butano / propano |
 | Lector RFID | RC522 (MFRC522, SPI, 3.3 V) | Identificacion de usuario para acceso |
 | Sensor de movimiento | PIR HC-SR501 | Deteccion de presencia |
 | Cerradura | Servomotor SG90 | Abre la puerta tras un acceso autorizado |
@@ -347,20 +347,20 @@ CasaInteligenteWeb/
 
 ### Asignación de pines (ESP32)
 
-| Componente | GPIO | Tipo |
-|---|---|---|
-| DHT22 | GPIO 4 | Digital |
-| MQ-2 (DO) | GPIO 34 | Digital in |
-| PIR HC-SR501 | GPIO 26 | Digital in |
-| LED rojo | GPIO 2 | Digital out |
-| Buzzer | GPIO 15 | Digital out |
-| Boton reset | GPIO 14 | Digital in (pull-up, interrupt) |
-| Servo cerradura | GPIO 27 | PWM |
-| RC522 SDA / SS | GPIO 5 | SPI CS |
-| RC522 RST | GPIO 22 | Digital out |
-| RC522 SCK | GPIO 18 | SPI clock |
-| RC522 MOSI | GPIO 23 | SPI |
-| RC522 MISO | GPIO 19 | SPI |
+| Componente | GPIO | Tipo | Alimentacion |
+|---|---|---|---|
+| DHT11 | GPIO 4 | Digital | 3.3V |
+| MQ-6 (DO) | GPIO 34 | Digital in | 5V (VIN) |
+| PIR HC-SR501 | GPIO 27 | Digital in | 5V (VIN) |
+| LED rojo | GPIO 2 | Digital out | — |
+| Buzzer | GPIO 15 | Digital out | — |
+| Boton reset | GPIO 14 | Digital in (pull-up, interrupt) | — |
+| Servo cerradura | GPIO 13 | PWM | 5V externo (GND comun) |
+| RC522 SDA / SS | GPIO 5 | SPI CS | 3.3V |
+| RC522 RST | GPIO 22 | Digital out | — |
+| RC522 SCK | GPIO 18 | SPI clock | — |
+| RC522 MOSI | GPIO 23 | SPI | — |
+| RC522 MISO | GPIO 19 | SPI | — |
 
 > ⚠️ El RC522 trabaja a **3.3 V** (no lo conectes a 5 V). El servomotor SG90 conviene alimentarlo con una fuente externa de 5 V con GND comun al ESP32 para evitar caidas de tension.
 
