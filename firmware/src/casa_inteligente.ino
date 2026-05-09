@@ -98,9 +98,18 @@ String escapar(const String &s) {
     return r;
 }
 
+// Actualiza LED y buzzer cada vez que se llama. Cuando la alarma esta activa,
+// genera un patron pulsante (2 Hz) con DC: 250 ms encendido, 250 ms apagado.
+// Hay que invocarla en cada iteracion del loop.
 void controlActuadores() {
-    digitalWrite(PIN_LED, alarmaActiva ? HIGH : LOW);
-    digitalWrite(PIN_BUZZER, alarmaActiva ? HIGH : LOW);
+    if (!alarmaActiva) {
+        digitalWrite(PIN_LED, LOW);
+        digitalWrite(PIN_BUZZER, LOW);
+        return;
+    }
+    bool fase = ((millis() / 250) % 2) == 0;
+    digitalWrite(PIN_LED, fase ? HIGH : LOW);
+    digitalWrite(PIN_BUZZER, fase ? HIGH : LOW);
 }
 
 void emitirEstadoAlarma() {
@@ -608,6 +617,7 @@ void loop() {
     ws.cleanupClients();
     revisarBoton();
     cerrarPuertaSiToca();
+    controlActuadores();   // mantiene el patron pulsante de LED+buzzer
 
 #if MODO_SIMULADOR
     if (millis() - ultimaLectura >= INTERVALO_SIMULADOR_MS) {
