@@ -1,0 +1,84 @@
+// =============================================================
+//  TEST PIR (HC-SR501)
+// =============================================================
+//  Sketch aislado para probar SOLO el sensor PIR.
+//  Sin WiFi, sin MySQL, sin WebSocket — solo lee el pin y
+//  muestra el estado en el monitor serie cada vez que cambia.
+//
+//  CONEXION:
+//    PIR VCC  -> 5V (VIN del ESP32)
+//    PIR GND  -> GND
+//    PIR OUT  -> GPIO 26  (D26 en la placa)
+//
+//  AJUSTES DEL MODULO HC-SR501:
+//    Sx (sensibilidad) -> al medio
+//    Tx (delay)        -> minimo (antihorario al tope)
+//    Jumper            -> H
+// =============================================================
+
+#include <Arduino.h>
+#include <WiFi.h>  // necesario porque PIO arrastra WebServer.h transitivamente
+
+#define PIN_PIR 26
+
+int pirAnt = LOW;
+unsigned long ultimoEstado = 0;
+unsigned long inicio = 0;
+unsigned long contadorMovimientos = 0;
+
+void setup() {
+    Serial.begin(115200);
+    delay(500);
+
+    pinMode(PIN_PIR, INPUT_PULLDOWN);
+
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("   TEST PIR (HC-SR501)");
+    Serial.println("================================");
+    Serial.println("Pin OUT del PIR -> GPIO 26");
+    Serial.println("Alimentacion    -> 5V");
+    Serial.println();
+    Serial.println("Esperando warm-up (60 segundos)...");
+    Serial.println("NO te muevas frente al sensor durante este tiempo.");
+    Serial.println();
+
+    for (int i = 60; i > 0; i--) {
+        Serial.printf("%d ", i);
+        if (i % 10 == 0) Serial.println();
+        delay(1000);
+    }
+
+    Serial.println();
+    Serial.println("================================");
+    Serial.println("Warm-up completo. Ya puedes probar.");
+    Serial.println("Mueve la mano/brazo frente al PIR.");
+    Serial.println("================================");
+    inicio = millis();
+}
+
+void loop() {
+    int pir = digitalRead(PIN_PIR);
+    unsigned long t = (millis() - inicio) / 1000;
+
+    // Detectar flanco subida (LOW -> HIGH) = movimiento detectado
+    if (pir == HIGH && pirAnt == LOW) {
+        contadorMovimientos++;
+        Serial.printf("[%lus] >>> MOVIMIENTO #%lu DETECTADO\n", t, contadorMovimientos);
+    }
+    // Detectar flanco bajada (HIGH -> LOW) = sensor "se calmo"
+    else if (pir == LOW && pirAnt == HIGH) {
+        Serial.printf("[%lus] <<< sensor vuelve a quieto\n", t);
+    }
+    pirAnt = pir;
+
+    // Imprimir estado actual cada 3 segundos para saber que esta vivo
+    if (millis() - ultimoEstado >= 3000) {
+        ultimoEstado = millis();
+        Serial.printf("[%lus] estado del pin: %s\n",
+                      t,
+                      pir == HIGH ? "HIGH (deteccion)" : "LOW (quieto)");
+    }
+
+    delay(20);
+}

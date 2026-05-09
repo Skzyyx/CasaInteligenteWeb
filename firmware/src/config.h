@@ -26,7 +26,7 @@
 // Cuando esta en 1, el ESP32 ignora los pines de sensores y genera
 // alertas aleatorias por si mismo (igual que hacia el simulador en Node).
 // Cambia a 0 cuando ya tengas el circuito armado.
-#define MODO_SIMULADOR          1
+#define MODO_SIMULADOR          0
 #define INTERVALO_SIMULADOR_MS  8000   // milisegundos entre alertas simuladas
 
 #endif

@@ -1,0 +1,18 @@
+{
+    "folders": [
+        {
+            "name": "firmware (PlatformIO)",
+            "path": "firmware"
+        },
+        {
+            "name": "repo (root)",
+            "path": "."
+        }
+    ],
+    "settings": {
+        "files.associations": {
+            "*.ino": "cpp"
+        },
+        "C_Cpp.intelliSenseEngine": "default"
+    }
+}

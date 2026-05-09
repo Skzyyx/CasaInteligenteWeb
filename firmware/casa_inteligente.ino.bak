@@ -43,18 +43,22 @@
 #define PIN_RC522_RST 22
 // SPI por defecto del ESP32: SCK=18, MISO=19, MOSI=23
 
-#define DHT_TIPO   DHT22
+// Cambia entre DHT11 (azul) y DHT22/AM2302 (blanco) segun tu sensor
+#define DHT_TIPO   DHT11
 
 // ===== UMBRALES =====
-#define TEMP_ALTA          35.0    // grados Celsius
-#define TEMP_CRITICA       50.0
-#define HUMEDAD_ALTA       80.0    // porcentaje
+#define TEMP_ALTA          28.0    // grados Celsius
+#define TEMP_CRITICA       38.0
+#define HUMEDAD_ALTA       65.0    // porcentaje
 #define DEBOUNCE_MS        300
 
 // Intervalo entre lecturas de sensores
+// (DHT22 necesita >= 2000 ms, no bajar de ahi)
 #define INTERVALO_LECTURA  2000    // ms
 // Cooldown entre alertas del mismo sensor para no saturar la BD
-#define COOLDOWN_ALERTA    10000   // ms
+#define COOLDOWN_ALERTA    3000    // ms
+// Cada cuanto imprimir lecturas crudas en el monitor serie (debug)
+#define INTERVALO_DEBUG    5000    // ms
 // Tiempo que la cerradura permanece abierta tras un acceso autorizado
 #define TIEMPO_PUERTA_MS   5000
 // Posiciones del servo de la cerradura
@@ -77,8 +81,9 @@ Servo cerradura;
 volatile bool alarmaActiva = false;
 unsigned long ultimaLectura = 0;
 unsigned long ultimaAlerta[4] = { 0, 0, 0, 0 }; // DHT22, MQ2, RFID, PIR
-unsigned long ultimoBoton = 0;
+volatile unsigned long ultimoBoton = 0;
 unsigned long puertaAbiertaDesde = 0;
+unsigned long ultimoDebug = 0;
 
 // Estado anterior de los sensores digitales para detectar flancos
 int pirAnterior = LOW;
@@ -403,20 +408,23 @@ void leerSensores() {
     // ----- DHT22 -----
     float t = dht.readTemperature();
     float h = dht.readHumidity();
-    if (!isnan(t) && !isnan(h)) {
+    bool dhtOk = !isnan(t) && !isnan(h);
+    if (dhtOk) {
+        // Temperatura y humedad son lecturas independientes: chequearlas por separado
         if (t >= TEMP_CRITICA) {
             disparar("DHT22", "temperatura_critica", "¡Temperatura critica! Posible incendio",
                      String(t, 1) + "°C", "critica", 0);
         } else if (t >= TEMP_ALTA) {
             disparar("DHT22", "temperatura_alta", "Temperatura elevada detectada",
                      String(t, 1) + "°C", "alta", 0);
-        } else if (h >= HUMEDAD_ALTA) {
+        }
+        if (h >= HUMEDAD_ALTA) {
             disparar("DHT22", "humedad_alta", "Humedad muy elevada",
                      String(h, 1) + "%", "media", 0);
         }
     }
 
-    // ----- MQ-2 (salida digital activa en bajo) -----
+    // ----- MQ-6 (salida digital activa en bajo) -----
     int mq2 = digitalRead(PIN_MQ2);
     if (mq2 == LOW) {
         disparar("MQ2", "gas_detectado", "Concentracion de gas detectada",
@@ -430,6 +438,21 @@ void leerSensores() {
                  "detectado", "media", 3);
     }
     pirAnterior = pir;
+
+    // ----- DEBUG: imprimir lecturas crudas cada INTERVALO_DEBUG ms -----
+    if (millis() - ultimoDebug >= INTERVALO_DEBUG) {
+        ultimoDebug = millis();
+        if (dhtOk) {
+            Serial.printf("[lectura] DHT22 T=%.1f°C H=%.1f%% | MQ6 D0=%s | PIR=%s\n",
+                          t, h,
+                          mq2 == LOW ? "GAS(LOW)" : "limpio(HIGH)",
+                          pir == HIGH ? "MOVIMIENTO" : "quieto");
+        } else {
+            Serial.printf("[lectura] DHT22 NaN (revisar cableado/pull-up) | MQ6 D0=%s | PIR=%s\n",
+                          mq2 == LOW ? "GAS(LOW)" : "limpio(HIGH)",
+                          pir == HIGH ? "MOVIMIENTO" : "quieto");
+        }
+    }
 }
 
 // =============================================================
@@ -528,7 +551,7 @@ void montarFs() {
     Serial.println("✅ LittleFS montado");
 }
 
-// ===============================================P==============
+// =============================================================
 //  SETUP / LOOP
 // =============================================================
 void setup() {
@@ -541,7 +564,7 @@ void setup() {
     randomSeed(micros());
 
     pinMode(PIN_MQ2, INPUT);
-    pinMode(PIN_PIR, INPUT);
+    pinMode(PIN_PIR, INPUT_PULLDOWN);  // Pull-down: si PIR no esta cableado, lee LOW estable
     pinMode(PIN_LED, OUTPUT);
     pinMode(PIN_BUZZER, OUTPUT);
     pinMode(PIN_BOTON, INPUT_PULLUP);
