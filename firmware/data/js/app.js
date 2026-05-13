@@ -60,6 +60,8 @@ const el = {
 // ===== ESTADO =====
 let alertas = [];
 let alarmaActiva = false;
+const timersSensor = {};               // sensor -> id de timeout que lo apaga
+const DURACION_PULSO_MS = 8000;        // cuanto tiempo se queda encendido un icono tras una alerta
 
 // ===== MAPEO VISUAL DE SENSORES =====
 const ICONOS_SENSOR = {
@@ -122,26 +124,20 @@ function renderizarAlertas() {
     el.contadorAlertas.textContent = alertas.length;
 }
 
-function actualizarTarjetasSensores() {
-    document.querySelectorAll('.sensor-card').forEach(card => {
-        const sensor = card.dataset.sensor;
-        card.classList.remove('alerta');
-        const estadoEl = card.querySelector('.sensor-estado');
-        if (estadoEl) estadoEl.textContent = ESTADO_NORMAL_SENSOR[sensor] || 'Normal';
-    });
+function pulsoSensor(sensor) {
+    const card = document.querySelector(`.sensor-card[data-sensor="${sensor}"]`);
+    if (!card) return;
+    const estadoEl = card.querySelector('.sensor-estado');
 
-    if (alarmaActiva && alertas.length > 0) {
-        const sensoresActivos = new Set();
-        alertas.slice(0, 5).forEach(a => sensoresActivos.add(a.sensor));
-        sensoresActivos.forEach(sensor => {
-            const card = document.querySelector(`.sensor-card[data-sensor="${sensor}"]`);
-            if (card) {
-                card.classList.add('alerta');
-                const estadoEl = card.querySelector('.sensor-estado');
-                if (estadoEl) estadoEl.textContent = '¡ALERTA!';
-            }
-        });
-    }
+    card.classList.add('alerta');
+    if (estadoEl) estadoEl.textContent = '¡ALERTA!';
+
+    if (timersSensor[sensor]) clearTimeout(timersSensor[sensor]);
+    timersSensor[sensor] = setTimeout(() => {
+        card.classList.remove('alerta');
+        if (estadoEl) estadoEl.textContent = ESTADO_NORMAL_SENSOR[sensor] || 'Normal';
+        delete timersSensor[sensor];
+    }, DURACION_PULSO_MS);
 }
 
 function actualizarEstadoAlarma(activa) {
@@ -161,7 +157,6 @@ function actualizarEstadoAlarma(activa) {
         el.alarmaSubtexto.textContent = 'Todos los sensores operan correctamente';
         el.btnApagar.classList.add('oculto');
     }
-    actualizarTarjetasSensores();
 }
 
 // ===== MANEJO DE MENSAJES DEL ESP32 =====
@@ -171,13 +166,14 @@ function manejarMensaje(msg) {
     if (msg.tipo === 'historial') {
         alertas = Array.isArray(msg.payload) ? msg.payload : [];
         renderizarAlertas();
-        actualizarTarjetasSensores();
 
     } else if (msg.tipo === 'nueva-alerta') {
         alertas.unshift(msg.payload);
         if (alertas.length > 50) alertas.length = 50;
+        if (msg.payload && msg.payload.sensor) {
+            pulsoSensor(msg.payload.sensor);
+        }
         renderizarAlertas();
-        actualizarTarjetasSensores();
 
     } else if (msg.tipo === 'estado-alarma') {
         actualizarEstadoAlarma(Boolean(msg.payload && msg.payload.alarma_activa));

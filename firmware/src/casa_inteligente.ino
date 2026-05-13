@@ -48,7 +48,7 @@
 #define DHT_TIPO   DHT11
 
 // ===== UMBRALES =====
-#define TEMP_ALTA          30.0    // grados Celsius
+#define TEMP_ALTA          32.0    // grados Celsius
 #define TEMP_CRITICA       38.0
 #define HUMEDAD_ALTA       65.0    // porcentaje
 #define DEBOUNCE_MS        300
@@ -62,9 +62,11 @@
 #define INTERVALO_DEBUG    5000    // ms
 // Tiempo que la cerradura permanece abierta tras un acceso autorizado
 #define TIEMPO_PUERTA_MS   5000
-// Posiciones del servo de la cerradura
-#define SERVO_CERRADO      0
-#define SERVO_ABIERTO      90
+// Servo de rotacion continua (no posicional):
+//   write(90) = PARADO  | write(0) = gira sentido A | write(180) = gira sentido B
+// "Abierto" = gira sentido apertura durante TIEMPO_PUERTA_MS, despues vuelve a parar.
+#define SERVO_CERRADO      90      // STOP
+#define SERVO_ABIERTO      0       // gira sentido apertura
 
 // ===== OBJETOS GLOBALES =====
 DHT dht(PIN_DHT, DHT_TIPO);
@@ -125,19 +127,24 @@ void emitirEstadoAlarma() {
 // =============================================================
 //  CONEXION A MySQL
 // =============================================================
+static bool mysqlDeshabilitado = false;
+
 bool conectarSql() {
     if (conn.connected()) return true;
+    if (mysqlDeshabilitado) return false;
 
     Serial.println("Conectando a MySQL...");
     if (conn.connect(ipServidorSql, MYSQL_PORT, MYSQL_USER, MYSQL_PASS, MYSQL_DB)) {
         Serial.println("✅ Conectado a MySQL");
         return true;
     }
-    Serial.println("❌ Falla al conectar a MySQL");
+    Serial.println("❌ Falla al conectar a MySQL — deshabilitado hasta el proximo reboot");
+    mysqlDeshabilitado = true;
     return false;
 }
 
 void asegurarSql() {
+    if (mysqlDeshabilitado) return;
     if (!conn.connected()) {
         conectarSql();
     }
@@ -587,8 +594,25 @@ void setup() {
 
     SPI.begin();
     rfid.PCD_Init();
-    cerradura.attach(PIN_SERVO);
-    cerradura.write(SERVO_CERRADO);
+    cerradura.setPeriodHertz(50);
+    cerradura.attach(PIN_SERVO, 500, 2400);
+    cerradura.writeMicroseconds(1500);   // pulso STOP estandar para rotacion continua
+
+#if CALIBRACION_SERVO
+    Serial.println("===============================================");
+    Serial.println(" MODO CALIBRACION DE SERVO");
+    Serial.println(" Observa en que valor el servo SE QUEDA QUIETO");
+    Serial.println(" Despues poner CALIBRACION_SERVO = 0 en config.h");
+    Serial.println("===============================================");
+    const int valores[] = {1300, 1400, 1450, 1470, 1480, 1490, 1500, 1510, 1520, 1530, 1550, 1600, 1700};
+    while (true) {
+        for (int v : valores) {
+            Serial.printf(">> Pulso: %d us\n", v);
+            cerradura.writeMicroseconds(v);
+            delay(4000);
+        }
+    }
+#endif
 
     montarFs();
     conectarWifi();
